@@ -31,6 +31,7 @@ odoo.define('point_of_sale.PaymentScreen', function (require) {
             onChangeOrder(this._onPrevOrder, this._onNewOrder);
             useErrorHandlers();
             this.payment_interface = null;
+            this.error = false;
             this.payment_methods_from_config = this.env.pos.payment_methods.filter(method => this.env.pos.config.payment_method_ids.includes(method.id));
         }
         get currentOrder() {
@@ -75,12 +76,13 @@ odoo.define('point_of_sale.PaymentScreen', function (require) {
         }
         _updateSelectedPaymentline() {
             if (this.paymentLines.every((line) => line.paid)) {
-                this.currentOrder.add_paymentline(this.env.pos.payment_methods[0]);
+                this.currentOrder.add_paymentline(this.payment_methods_from_config[0]);
             }
             if (!this.selectedPaymentLine) return; // do nothing if no selected payment line
             // disable changing amount on paymentlines with running or done payments on a payment terminal
+            const payment_terminal = this.selectedPaymentLine.payment_method.payment_terminal;
             if (
-                this.payment_interface &&
+                payment_terminal &&
                 !['pending', 'retry'].includes(this.selectedPaymentLine.get_payment_status())
             ) {
                 return;
@@ -119,6 +121,7 @@ odoo.define('point_of_sale.PaymentScreen', function (require) {
             }
         }
         deletePaymentLine(event) {
+            var self = this;
             const { cid } = event.detail;
             const line = this.paymentLines.find((line) => line.cid === cid);
 
@@ -126,12 +129,18 @@ odoo.define('point_of_sale.PaymentScreen', function (require) {
             // it is removed, the terminal should get a cancel
             // request.
             if (['waiting', 'waitingCard', 'timeout'].includes(line.get_payment_status())) {
-                line.payment_method.payment_terminal.send_payment_cancel(this.currentOrder, cid);
+                line.set_payment_status('waitingCancel');
+                line.payment_method.payment_terminal.send_payment_cancel(this.currentOrder, cid).then(function() {
+                    self.currentOrder.remove_paymentline(line);
+                    NumberBuffer.reset();
+                    self.render();
+                })
             }
-
-            this.currentOrder.remove_paymentline(line);
-            NumberBuffer.reset();
-            this.render();
+            else if (line.get_payment_status() !== 'waitingCancel') {
+                this.currentOrder.remove_paymentline(line);
+                NumberBuffer.reset();
+                this.render();
+            }
         }
         selectPaymentLine(event) {
             const { cid } = event.detail;
@@ -177,6 +186,8 @@ odoo.define('point_of_sale.PaymentScreen', function (require) {
                     syncedOrderBackendIds = await this.env.pos.push_single_order(this.currentOrder);
                 }
             } catch (error) {
+                if (error.code == 700)
+                    this.error = true;
                 if (error instanceof Error) {
                     throw error;
                 } else {
@@ -217,7 +228,7 @@ odoo.define('point_of_sale.PaymentScreen', function (require) {
             }
         }
         get nextScreen() {
-            return 'ReceiptScreen';
+            return !this.error? 'ReceiptScreen' : 'ProductScreen';
         }
         async _isOrderValid(isForceValidate) {
             if (this.currentOrder.get_orderlines().length === 0) {
@@ -320,7 +331,7 @@ odoo.define('point_of_sale.PaymentScreen', function (require) {
             const isPaymentSuccessful = await payment_terminal.send_payment_request(line.cid);
             if (isPaymentSuccessful) {
                 line.set_payment_status('done');
-                line.can_be_reversed = this.payment_interface.supports_reversals;
+                line.can_be_reversed = payment_terminal.supports_reversals;
             } else {
                 line.set_payment_status('retry');
             }
