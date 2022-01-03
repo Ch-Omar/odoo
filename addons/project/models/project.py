@@ -212,8 +212,8 @@ class Project(models.Model):
                                                  string="Allowed Internal Users", default=lambda self: self.env.user, domain=[('share', '=', False)])
     allowed_portal_user_ids = fields.Many2many('res.users', 'project_allowed_portal_users_rel', string="Allowed Portal Users", domain=[('share', '=', True)])
     doc_count = fields.Integer(compute='_compute_attached_docs_count', string="Number of documents attached")
-    date_start = fields.Date(string='Start Date')
-    date = fields.Date(string='Expiration Date', index=True, tracking=True)
+    date_start = fields.Datetime(string='Start Date')
+    date = fields.Datetime(string='Expiration Date', index=True, tracking=True)
     subtask_project_id = fields.Many2one('project.project', string='Sub-task Project', ondelete="restrict",
         help="Project in which sub-tasks of the current project will be created. It can be the current project itself.")
     allow_subtasks = fields.Boolean('Sub-tasks', default=lambda self: self.env.user.has_group('project.group_subtask_project'))
